@@ -1,0 +1,135 @@
+
+ Design
+module phase2_switch_room (
+    input clk,
+    input reset,
+    input start,
+    input [3:0] switch_in,
+    output reg phase2_done,
+    output reg phase2_fail
+);
+
+    // FSM states
+    parameter IDLE    = 2'b00;
+    parameter CHECK   = 2'b01;
+    parameter SUCCESS = 2'b10;
+    parameter FAIL    = 2'b11;
+
+    reg [1:0] current_state, next_state;
+
+    localparam [3:0] EXPECTED_CODE = 4'b1101;
+    localparam integer TIMEOUT_CYCLES = 20;
+
+    reg [7:0] timeout_counter;
+
+    // State & timeout update
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            current_state <= IDLE;
+            timeout_counter <= 0;
+        end else begin
+            current_state <= next_state;
+            if (current_state == CHECK)
+                timeout_counter <= timeout_counter + 1;
+            else
+                timeout_counter <= 0;
+        end
+    end
+
+    // FSM transitions
+    always @(*) begin
+        case (current_state)
+            IDLE: begin
+                next_state = (start) ? CHECK : IDLE;
+            end
+            CHECK: begin
+                if (switch_in == EXPECTED_CODE)
+                    next_state = SUCCESS;
+                else if (timeout_counter >= TIMEOUT_CYCLES)
+                    next_state = FAIL;
+                else
+                    next_state = CHECK;
+            end
+            SUCCESS: next_state = IDLE;
+            FAIL:    next_state = IDLE;
+            default: next_state = IDLE;
+        endcase
+    end
+
+    // Outputs
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            phase2_done <= 0;
+            phase2_fail <= 0;
+        end else begin
+            case (next_state)
+                SUCCESS: begin
+                    phase2_done <= 1;
+                    phase2_fail <= 0;
+                end
+                FAIL: begin
+                    phase2_done <= 0;
+                    phase2_fail <= 1;
+                end
+                default: begin
+                    phase2_done <= 0;
+                    phase2_fail <= 0;
+                end
+            endcase
+        end
+    end
+
+endmodule
+
+ testbench
+`timescale 1ns/1ps
+
+module tb_phase2_switch_room;
+
+    reg clk;
+    reg reset;
+    reg start;
+    reg [3:0] switch_in;
+    wire phase2_done, phase2_fail;
+
+    // DUT instance
+    phase2_switch_room uut (
+        .clk(clk),
+        .reset(reset),
+        .start(start),
+        .switch_in(switch_in),
+        .phase2_done(phase2_done),
+        .phase2_fail(phase2_fail)
+    );
+
+    // Clock generation: 10ns period
+    always #5 clk = ~clk;
+
+    // VCD for GTKWave
+    initial begin
+        $dumpfile("wave.vcd");
+        $dumpvars(0, tb_phase2_switch_room);
+    end
+
+    // Stimulus
+    initial begin
+        // Init
+        clk = 0;
+        reset = 1;
+        start = 0;
+        switch_in = 4'b0000;
+
+        // Release reset
+        #10 reset = 0;
+
+        // Apply start + correct code
+        #10 start = 1;
+            switch_in = 4'b1101;  // Correct code
+
+        #10 start = 0;
+
+        // Wait to observe outputs
+        #100 $finish;
+    end
+
+endmodule
