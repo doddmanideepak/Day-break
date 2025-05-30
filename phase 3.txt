@@ -1,0 +1,148 @@
+Design
+
+module phase3_maze_tracker (
+    input  logic        clk,
+    input  logic        reset,
+    input  logic        phase2_done,
+    input  logic        dir_valid,
+    input  logic [2:0]  dir_in,
+    output logic        phase3_done,
+    output logic        phase3_fail,
+    output logic        phase3_active
+);
+
+    // Direction encoding
+    localparam UP    = 3'b000;
+    localparam DOWN  = 3'b001;
+    localparam LEFT  = 3'b010;
+    localparam RIGHT = 3'b011;
+    localparam STAY  = 3'b100;
+
+    // Expected direction sequence
+    logic [2:0] expected_seq [0:4];
+    initial begin
+        expected_seq[0] = UP;
+        expected_seq[1] = RIGHT;
+        expected_seq[2] = DOWN;
+        expected_seq[3] = LEFT;
+        expected_seq[4] = STAY;
+    end
+
+    logic [2:0] current_index;
+    logic active;
+
+    assign phase3_active = active;
+
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            current_index <= 0;
+            phase3_done   <= 0;
+            phase3_fail   <= 0;
+            active        <= 0;
+        end else begin
+            if (!active && phase2_done) begin
+                // Enter Phase 3
+                active        <= 1;
+                current_index <= 0;
+                phase3_done   <= 0;
+                phase3_fail   <= 0;
+            end else if (active) begin
+                if (dir_valid) begin
+                    if (dir_in == expected_seq[current_index]) begin
+                        if (current_index == 4) begin
+                            phase3_done <= 1;
+                            active      <= 0;
+                        end else begin
+                            current_index <= current_index + 1;
+                        end
+                    end else begin
+                        phase3_fail   <= 1;
+                        active        <= 0;
+                    end
+                end
+            end
+        end
+    end
+
+endmodule
+
+Test bench
+
+
+`timescale 1ns/1ps
+
+module tb_phase3_maze_tracker;
+
+    logic clk;
+    logic reset;
+    logic phase2_done;
+    logic dir_valid;
+    logic [2:0] dir_in;
+    logic phase3_done, phase3_fail, phase3_active;
+
+    phase3_maze_tracker uut (
+        .clk(clk),
+        .reset(reset),
+        .phase2_done(phase2_done),
+        .dir_valid(dir_valid),
+        .dir_in(dir_in),
+        .phase3_done(phase3_done),
+        .phase3_fail(phase3_fail),
+        .phase3_active(phase3_active)
+    );
+
+    // Clock generation
+    always #5 clk = ~clk;
+
+    // Waveform dump
+    initial begin
+        $dumpfile("phase3_wave.vcd");
+        $dumpvars(0, tb_phase3_maze_tracker);
+    end
+
+    task apply_direction(input [2:0] dir);
+        begin
+            dir_in = dir;
+            dir_valid = 1;
+            #10;
+            dir_valid = 0;
+            #10;
+        end
+    endtask
+
+    initial begin
+        // Initialize
+        clk = 0;
+        reset = 1;
+        dir_valid = 0;
+        dir_in = 3'b000;
+        phase2_done = 0;
+
+        #20 reset = 0;
+
+        // Phase 2 completes
+        #10 phase2_done = 1;
+        #10 phase2_done = 0;
+
+        // Test Case 1: Correct sequence
+        apply_direction(3'b000); // UP
+        apply_direction(3'b011); // RIGHT
+        apply_direction(3'b001); // DOWN
+        apply_direction(3'b010); // LEFT
+        apply_direction(3'b100); // STAY
+
+        #20;
+
+        // Reset and try failure case
+        reset = 1; #10 reset = 0;
+        #10 phase2_done = 1; #10 phase2_done = 0;
+
+        // Test Case 2: Incorrect sequence (wrong 3rd step)
+        apply_direction(3'b000); // UP
+        apply_direction(3'b011); // RIGHT
+        apply_direction(3'b011); // WRONG here (should be DOWN)
+
+        #50 $finish;
+    end
+
+endmodule
