@@ -1,0 +1,139 @@
+Design
+
+module phase5_time_lock (
+    input  logic       clk,
+    input  logic       reset,
+    input  logic       phase4_done,
+    output logic [1:0] time_lock_out,
+    output logic       phase5_done,
+    output logic       phase5_fail,
+    output logic       phase5_active
+);
+
+    typedef enum logic [2:0] {
+        IDLE,
+        STEP1,
+        STEP2,
+        STEP3,
+        DONE
+    } state_t;
+
+    state_t current_state, next_state;
+
+    localparam int STEP_CYCLES = 5;
+    logic [$clog2(STEP_CYCLES)-1:0] counter;
+
+    // FSM State Register
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            current_state  <= IDLE;
+            counter        <= 0;
+            time_lock_out  <= 2'b00;
+            phase5_done    <= 0;
+            phase5_fail    <= 0;
+        end else begin
+            current_state <= next_state;
+
+            if (current_state == STEP1 || current_state == STEP2 || current_state == STEP3)
+                counter <= counter + 1;
+            else
+                counter <= 0;
+
+            case (next_state)
+                STEP1: time_lock_out <= 2'b01;
+                STEP2: time_lock_out <= 2'b10;
+                STEP3: time_lock_out <= 2'b11;
+                default: time_lock_out <= 2'b00;
+            endcase
+
+            if (next_state == DONE)
+                phase5_done <= 1;
+        end
+    end
+
+    // FSM Next-State Logic
+    always_comb begin
+        next_state = current_state;
+        phase5_active = 0;
+
+        case (current_state)
+            IDLE: begin
+                if (phase4_done)
+                    next_state = STEP1;
+            end
+            STEP1: begin
+                phase5_active = 1;
+                if (counter == STEP_CYCLES - 1)
+                    next_state = STEP2;
+            end
+            STEP2: begin
+                phase5_active = 1;
+                if (counter == STEP_CYCLES - 1)
+                    next_state = STEP3;
+            end
+            STEP3: begin
+                phase5_active = 1;
+                if (counter == STEP_CYCLES - 1)
+                    next_state = DONE;
+            end
+            DONE: begin
+                phase5_active = 0;
+            end
+        endcase
+    end
+
+endmodule
+
+
+
+Test Bench
+
+`timescale 1ns/1ps
+
+module tb_phase5_time_lock;
+
+    logic clk;
+    logic reset;
+    logic phase4_done;
+    logic [1:0] time_lock_out;
+    logic phase5_done, phase5_fail, phase5_active;
+
+    phase5_time_lock uut (
+        .clk(clk),
+        .reset(reset),
+        .phase4_done(phase4_done),
+        .time_lock_out(time_lock_out),
+        .phase5_done(phase5_done),
+        .phase5_fail(phase5_fail),
+        .phase5_active(phase5_active)
+    );
+
+    // Clock generation
+    always #5 clk = ~clk;
+
+    // Dump to VCD
+    initial begin
+        $dumpfile("phase5_wave.vcd");
+        $dumpvars(0, tb_phase5_time_lock);
+    end
+
+    initial begin
+        // Initialization
+        clk = 0;
+        reset = 1;
+        phase4_done = 0;
+
+        // Hold reset
+        #20 reset = 0;
+
+        // Start FSM (trigger from previous phase)
+        #10 phase4_done = 1;
+        #10 phase4_done = 0;
+
+        // Wait for sequence to finish
+        #200;
+
+        $finish;
+    end
+
+endmodule
