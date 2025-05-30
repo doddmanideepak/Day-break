@@ -1,0 +1,134 @@
+Design and code
+
+module phase1_code_lock (
+    input  logic clk,
+    input  logic reset,
+    input  logic code_in,
+    input  logic start,
+    output logic phase1_done,
+    output logic phase1_fail
+);
+
+    typedef enum logic [2:0] {
+        IDLE, RECEIVE0, RECEIVE1, RECEIVE2, RECEIVE3, CHECK
+    } state_t;
+
+    state_t state, next_state;
+    logic [3:0] code_shift;
+
+    localparam [3:0] UNLOCK_CODE = 4'b1011;
+
+    // FSM sequential logic
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            state <= IDLE;
+            code_shift <= 4'b0000;
+        end else begin
+            state <= next_state;
+            // Only shift during RECEIVE states
+            if (state == RECEIVE0 || state == RECEIVE1 || state == RECEIVE2 || state == RECEIVE3)
+                code_shift <= {code_shift[2:0], code_in};
+        end
+    end
+
+    // FSM combinational logic
+    always_comb begin
+        next_state = state;
+        phase1_done = 0;
+        phase1_fail = 0;
+
+        case (state)
+            IDLE:
+                if (start) next_state = RECEIVE0;
+
+            RECEIVE0: next_state = RECEIVE1;
+            RECEIVE1: next_state = RECEIVE2;
+            RECEIVE2: next_state = RECEIVE3;
+            RECEIVE3: next_state = CHECK;
+
+            CHECK: begin
+                if (code_shift == UNLOCK_CODE)
+                    phase1_done = 1;
+                else
+                    phase1_fail = 1;
+                next_state = IDLE;
+            end
+        endcase
+    end
+endmodule
+
+
+
+
+Test Bench
+
+
+`timescale 1ns/1ps
+
+module testbench;
+    logic clk, reset, code_in, start;
+    logic phase1_done, phase1_fail;
+
+    // Instantiate the DUT
+    phase1_code_lock dut (
+        .clk(clk),
+        .reset(reset),
+        .code_in(code_in),
+        .start(start),
+        .phase1_done(phase1_done),
+        .phase1_fail(phase1_fail)
+    );
+
+    // Clock generation: 10ns period
+    always #5 clk = ~clk;
+
+    // Task to send serial code
+    task send_code(input [3:0] code);
+        for (int i = 3; i >= 0; i--) begin
+            @(posedge clk);
+            code_in = code[i];
+        end
+    endtask
+
+    initial begin
+        $dumpfile("dump.vcd");
+        $dumpvars(0, testbench);
+        $dumpvars(0, dut);  // <-- Needed for signals in EPWave
+
+        $display("=== Phase 1 Code Lock Test ===");
+        clk = 0; reset = 1; start = 0; code_in = 0;
+
+        // Reset
+        @(posedge clk); reset = 0;
+
+        // Test 1: Correct code 1011
+        @(posedge clk); start = 1;
+        @(posedge clk); start = 0;
+        send_code(4'b1011);
+        @(posedge clk); // Wait for CHECK
+        @(posedge clk); // Wait for outputs
+        if (phase1_done)
+            $display("PASS: Correct code unlocked.");
+        else
+            $display("FAIL: Correct code did not unlock.");
+
+        #20;
+
+        // Test 2: Wrong code 1101
+        @(posedge clk); reset = 1;
+        @(posedge clk); reset = 0;
+        @(posedge clk); start = 1;
+        @(posedge clk); start = 0;
+        send_code(4'b1101);
+        @(posedge clk);
+        @(posedge clk);
+        if (phase1_fail)
+            $display("PASS: Wrong code triggered fail.");
+        else
+            $display("FAIL: Wrong code did not fail.");
+
+        #20;
+        $display("Test complete.");
+        $finish;
+    end
+endmodule
