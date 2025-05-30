@@ -1,0 +1,130 @@
+Design
+
+module phase4_pressure_plates (
+    input clk,
+    input rst,
+    input [7:0] plate_in,
+    input valid, // signal to latch input
+    output reg phase4_done,
+    output reg phase4_fail
+);
+
+    reg [1:0] state, next_state;
+
+    // FSM States
+    localparam IDLE = 2'd0;
+    localparam S1   = 2'd1;
+    localparam S2   = 2'd2;
+    localparam DONE = 2'd3;
+    localparam FAIL = 2'd4;
+
+    // Expected values
+    parameter PAT0 = 8'b10101010;
+    parameter PAT1 = 8'b11001100;
+    parameter PAT2 = 8'b11110000;
+
+    always @(posedge clk or posedge rst) begin
+        if (rst)
+            state <= IDLE;
+        else
+            state <= next_state;
+    end
+
+    always @(*) begin
+        // Default values
+        next_state = state;
+        phase4_done = 0;
+        phase4_fail = 0;
+
+        case (state)
+            IDLE:
+                if (valid)
+                    next_state = (plate_in == PAT0) ? S1 : FAIL;
+
+            S1:
+                if (valid)
+                    next_state = (plate_in == PAT1) ? S2 : FAIL;
+
+            S2:
+                if (valid)
+                    next_state = (plate_in == PAT2) ? DONE : FAIL;
+
+            DONE:
+                phase4_done = 1;
+
+            FAIL:
+                phase4_fail = 1;
+        endcase
+    end
+
+endmodule
+
+
+Test Bench
+
+
+`timescale 1ns / 1ps
+
+module testbench;
+
+    reg clk = 0;
+    reg rst;
+    reg [7:0] plate_in;
+    reg valid;
+    wire phase4_done, phase4_fail;
+
+    phase4_pressure_plates dut (
+        .clk(clk),
+        .rst(rst),
+        .plate_in(plate_in),
+        .valid(valid),
+        .phase4_done(phase4_done),
+        .phase4_fail(phase4_fail)
+    );
+
+    always #5 clk = ~clk; // 10ns period
+
+    task send_sequence;
+        input [7:0] seq0, seq1, seq2;
+        begin
+            // First input
+            @(negedge clk); plate_in = seq0; valid = 1;
+            @(negedge clk); valid = 0;
+            // Second input
+            @(negedge clk); plate_in = seq1; valid = 1;
+            @(negedge clk); valid = 0;
+            // Third input
+            @(negedge clk); plate_in = seq2; valid = 1;
+            @(negedge clk); valid = 0;
+        end
+    endtask
+
+    initial begin
+        $dumpfile("dump.vcd"); $dumpvars;
+
+        // Reset system
+        rst = 1; valid = 0; plate_in = 8'd0;
+        #20 rst = 0;
+
+        $display("=== Test 1: Correct Sequence ===");
+        send_sequence(8'b10101010, 8'b11001100, 8'b11110000);
+        #20;
+        if (phase4_done)
+            $display("PASS: Correct sequence accepted.");
+        else
+            $display("FAIL: Correct sequence rejected.");
+
+        #20 rst = 1; #10 rst = 0;
+
+        $display("=== Test 2: Incorrect Sequence ===");
+        send_sequence(8'b10101010, 8'b00000000, 8'b11110000);
+        #20;
+        if (phase4_fail)
+            $display("PASS: Incorrect sequence detected.");
+        else
+            $display("FAIL: Incorrect sequence not flagged.");
+
+        #20 $finish;
+    end
+
+endmodule
